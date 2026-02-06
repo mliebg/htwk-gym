@@ -23,7 +23,7 @@ from envs.base_task import BaseTask
 from utils.utils import apply_randomization
 
 
-class ParameterWalk(BaseTask):
+class StandUp(BaseTask):
 
     def __init__(self, cfg):
         super().__init__(cfg)
