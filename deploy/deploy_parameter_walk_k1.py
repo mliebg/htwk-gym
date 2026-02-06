@@ -3,6 +3,7 @@ import time
 import yaml
 import logging
 import threading
+import pandas as pd
 
 from booster_robotics_sdk_python import (
     ChannelFactory,
@@ -42,6 +43,7 @@ class Controller:
         self.running = True
 
         self.publish_lock = threading.Lock()
+        self.key_frames = pd.DataFrame()
 
     def _init_timer(self):
         self.timer = Timer(TimerConfig(time_step=self.cfg["common"]["dt"]))
@@ -72,6 +74,7 @@ class Controller:
             self.logger.error(f"Failed to initialize communication: {e}")
             raise
 
+    # XXX
     def _low_state_handler(self, low_state_msg: LowState):
         if abs(low_state_msg.imu_state.rpy[0]) > 1.0 or abs(low_state_msg.imu_state.rpy[1]) > 1.0:
             self.logger.warning("IMU base rpy values are too large: {}".format(low_state_msg.imu_state.rpy))
@@ -92,6 +95,10 @@ class Controller:
                 self.dof_pos[i] = motor.q
                 self.dof_vel[i] = motor.dq
 
+            # add dof_pos to key_frames
+            self.key_frames.loc[len(self.key_frames)] = self.dof_pos
+
+
     def _send_cmd(self, cmd: LowCmd):
         self.low_cmd_publisher.Write(cmd)
 
@@ -104,6 +111,9 @@ class Controller:
             self.low_state_subscriber.CloseChannel()
         if hasattr(self, "publish_runner") and getattr(self, "publish_runner") != None:
             self.publish_runner.join(timeout=1.0)
+
+        date_str = time.strftime("%Y-%m-%d_%H-%M-%S")
+        self.key_frames.to_csv(f"key_frames_{date_str}.csv", index=False)
 
     def start_custom_mode_conditionally(self):
         print(f"{self.remoteControlService.get_custom_mode_operation_hint()}")
