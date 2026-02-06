@@ -2,3 +2,5 @@ tensorboard
 wandb
 imageio[ffmpeg]
 mujoco
+numpy==1.21.6
+matplotlib
