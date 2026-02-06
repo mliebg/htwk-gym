@@ -24,6 +24,7 @@ from utils.policy_thomas import Policy
 
 class Controller:
     def __init__(self, cfg_file) -> None:
+
         # Setup logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
@@ -43,7 +44,6 @@ class Controller:
         self.running = True
 
         self.publish_lock = threading.Lock()
-        self.key_frames = pd.DataFrame()
 
     def _init_timer(self):
         self.timer = Timer(TimerConfig(time_step=self.cfg["common"]["dt"]))
@@ -62,6 +62,9 @@ class Controller:
 
     def _init_communication(self) -> None:
         try:
+            # XXX Setup key frame + imu storage
+            self.key_frames = pd.DataFrame(columns=[f"dof_{i}" for i in range(self.cfg["common"]["joint_cnt"]) ]+["gyro0", "gyro1", "gyro2", "rpy0", "rpy1", "rpy2"])
+
             self.low_cmd = LowCmd()
             self.low_state_subscriber = B1LowStateSubscriber(self._low_state_handler)
             self.low_cmd_publisher = B1LowCmdPublisher()
@@ -76,9 +79,9 @@ class Controller:
 
     # XXX
     def _low_state_handler(self, low_state_msg: LowState):
-        if abs(low_state_msg.imu_state.rpy[0]) > 1.0 or abs(low_state_msg.imu_state.rpy[1]) > 1.0:
-            self.logger.warning("IMU base rpy values are too large: {}".format(low_state_msg.imu_state.rpy))
-            self.running = False
+        # if abs(low_state_msg.imu_state.rpy[0]) > 1.0 or abs(low_state_msg.imu_state.rpy[1]) > 1.0:
+        #     self.logger.warning("IMU base rpy values are too large: {}".format(low_state_msg.imu_state.rpy))
+        #     self.running = False
         self.timer.tick_timer_if_sim()
         time_now = self.timer.get_time()
         for i, motor in enumerate(low_state_msg.motor_state_serial):
@@ -95,8 +98,11 @@ class Controller:
                 self.dof_pos[i] = motor.q
                 self.dof_vel[i] = motor.dq
 
-            # add dof_pos to key_frames
-            self.key_frames.loc[len(self.key_frames)] = self.dof_pos
+            # add dof_pos + imu state to key_frames
+            key_frame = self.dof_pos.copy()
+            key_frame = np.append(key_frame, low_state_msg.imu_state.gyro)
+            key_frame = np.append(key_frame, low_state_msg.imu_state.rpy)
+            self.key_frames.loc[len(self.key_frames)] = key_frame
 
 
     def _send_cmd(self, cmd: LowCmd):
@@ -113,7 +119,9 @@ class Controller:
             self.publish_runner.join(timeout=1.0)
 
         date_str = time.strftime("%Y-%m-%d_%H-%M-%S")
-        self.key_frames.to_csv(f"key_frames_{date_str}.csv", index=False)
+        csv_path = f"./key_frames_{date_str}.csv"
+        self.key_frames.to_csv(csv_path, index=False)
+        print(f"Saved key frames to {csv_path}")
 
     def start_custom_mode_conditionally(self):
         print(f"{self.remoteControlService.get_custom_mode_operation_hint()}")
@@ -225,7 +233,7 @@ if __name__ == "__main__":
     with Controller(cfg_file) as controller:
         time.sleep(2)  # Wait for channels to initialize
         print("Initialization complete.")
-        controller.start_custom_mode_conditionally()
+        #controller.start_custom_mode_conditionally()
         controller.start_rl_gait_conditionally()
 
         try:
