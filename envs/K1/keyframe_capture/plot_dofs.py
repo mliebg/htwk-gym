@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import time
 
-def plot_dofs_and_imu(df):
+def plot_dofs_and_imu(df, lbl:str|None=None):
     # plot dof pos and imu data
     plt.figure(figsize=(12, 8))
     plt.subplot(2, 1, 1)
@@ -18,7 +18,7 @@ def plot_dofs_and_imu(df):
 
     plt.xlabel("Time (s)")
     plt.ylabel("Value")
-    plt.title("DOF Positions and IMU Data Over Time")
+    plt.title(f"DOF Positions and IMU Data Over Time {lbl}")
     plt.legend()
     plt.grid()
     plt.tight_layout()
@@ -27,22 +27,27 @@ def plot_dofs_and_imu(df):
 
 
 # check raw data
-df = pd.read_csv("/home/max/repos/htwk-gym/dofs_imu.csv")
+df = pd.read_csv("/home/max/repos/htwk-gym/envs/K1/keyframe_capture/dofs_imu.csv")
 df["time"] = df.index # correct time is irrelevant here, we just want to see the shape of the data
 # plot_dofs_and_imu(df)
 
 # we saw that nothing really happens until around index 4600, so we truncate the dateset
 # and save it to a new csv file and plot it again
-df_truncated = df[df["time"] >= 4600]
-df_truncated.to_csv("/home/max/repos/htwk-gym/dofs_imu_truncated.csv", index=False)
-plot_dofs_and_imu(df_truncated)
+df_truncated = df[(df["time"] >= 5000) & (df["time"] < 6100)]
+df_truncated.to_csv("/home/max/repos/htwk-gym/envs/K1/keyframe_capture/dofs_imu_truncated.csv", index=False)
+plot_dofs_and_imu(df_truncated, lbl="Truncated")
 
 # now we see stand up 1 plays from around 5000 to 5300
 # and stand up 2 from around 5800 to 6000, so we can use these two segments as key frames for imitation learning
 df_stand_up_1 = df_truncated[(df_truncated["time"] >= 5000) & (df_truncated["time"] < 5300)]
-df_stand_up_2 = df_truncated[(df_truncated["time"] >= 5800) & (df_truncated["time"] < 6000)]
-plot_dofs_and_imu(df_stand_up_1)
-plot_dofs_and_imu(df_stand_up_2)
+df_stand_up_2 = df_truncated[(df_truncated["time"] >= 5800) & (df_truncated["time"] < 6100)]
+plot_dofs_and_imu(df_stand_up_1, lbl="Stand Up 1")
+plot_dofs_and_imu(df_stand_up_2, lbl="Stand Up 2")
+
+# now we glue the two segments together to get a dataset for imitation learning
+df_stand_up = pd.concat([df_stand_up_1, df_stand_up_2], ignore_index=True)
+plot_dofs_and_imu(df_stand_up, lbl="Stand Up Combined")
+df_stand_up.to_csv("/home/max/repos/htwk-gym/envs/K1/keyframe_capture/dofs_imu_stand_up.csv", index=False)
 
 # now that we know our key frames for the stand up motions
 # we can extract import key positions and use them in our
