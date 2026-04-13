@@ -535,6 +535,7 @@ class StandUp(BaseTask):
         ).squeeze(1)
 
     def step(self, actions):
+        # XXX: implm captured key frame loading her maybe
         # pre physics step
         self.actions[:] = torch.clip(actions, -self.cfg["normalization"]["clip_actions"], self.cfg["normalization"]["clip_actions"])
         dof_targets = self.default_dof_pos + self.cfg["control"]["action_scale"] * self.actions
