@@ -9,6 +9,12 @@ basic:
   debug_feet_offset: false # enable debug print for feet_x_offset in play mode
   task: "K1/ParameterWalk"
 
+keyframes:
+  playback: true                                    # set to true to override policy with keyframe playback
+  csv_path: "keyframe_capture/dofs_imu_stand_up.csv" # relative to envs/K1/
+  index: 0                                          # which CSV row (0-599) to use as the static pose
+  height_offset: 0.05                               # [m] extra height to spawn above ground
+
 env:
   num_envs: 1
   num_observations: 54

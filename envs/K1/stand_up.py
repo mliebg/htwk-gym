@@ -31,6 +31,7 @@ class StandUp(BaseTask):
         self.gym.prepare_sim(self.sim)
         self._init_buffers()
         self._prepare_reward_function()
+        self._load_keyframes()
         
         # Initialize CSV logging for first environment only
         self._init_csv_logging()
@@ -298,6 +299,36 @@ class StandUp(BaseTask):
             name = "_reward_" + name
             self.reward_functions.append(getattr(self, name))
 
+    def _load_keyframes(self):
+        """Load captured keyframes from CSV.
+
+        The CSV has 22 DOFs; only the last 12 (indices 10-21) are the
+        locomotion DOFs used in simulation.  All 600 rows are kept so you
+        can pick any row index via the ``keyframes.index`` config param.
+
+        Result: ``self.keyframes`` shape (600, 12) on device.
+        """
+        kf_cfg = self.cfg.get("keyframes", {})
+        self.keyframe_playback = kf_cfg.get("playback", False)
+        self.keyframe_index = kf_cfg.get("index", 0)
+        self.keyframe_height_offset = kf_cfg.get("height_offset", 0.05)
+        csv_path = kf_cfg.get("csv_path", None)
+
+        if csv_path is None:
+            self.keyframes = None
+            return
+
+        if not os.path.isabs(csv_path):
+            csv_path = os.path.join(os.path.dirname(__file__), csv_path)
+
+        data = np.loadtxt(csv_path, delimiter=",", skiprows=1)
+        loco_dofs = data[:, 10:22]  # 12 locomotion DOFs
+
+        self.keyframes = torch.tensor(loco_dofs, dtype=torch.float, device=self.device)
+        print(f"[StandUp] Loaded {self.keyframes.shape[0]} keyframes from CSV")
+        print(f"[StandUp] Active keyframe index: {self.keyframe_index}  "
+              f"height_offset: {self.keyframe_height_offset}m")
+
     def _init_csv_logging(self):
         """Initialize CSV files for logging actions and observations of the first environment"""
         # Create logs directory if it doesn't exist
@@ -382,6 +413,9 @@ class StandUp(BaseTask):
         self.root_states[env_ids, :2] += self.env_origins[env_ids, :2]
         self.root_states[env_ids, :2] = apply_randomization(self.root_states[env_ids, :2], self.cfg["randomization"].get("init_base_pos_xy"))
         self.root_states[env_ids, 2] += self.terrain.terrain_heights(self.root_states[env_ids, :2])
+        # Extra height so keyframe poses don't clip into the ground
+        if self.keyframe_playback:
+            self.root_states[env_ids, 2] += self.keyframe_height_offset
         self.root_states[env_ids, 3:7] = quat_from_euler_xyz(
             torch.zeros(len(env_ids), dtype=torch.float, device=self.device),
             torch.zeros(len(env_ids), dtype=torch.float, device=self.device),
@@ -535,10 +569,16 @@ class StandUp(BaseTask):
         ).squeeze(1)
 
     def step(self, actions):
-        # XXX: implm captured key frame loading her maybe
         # pre physics step
         self.actions[:] = torch.clip(actions, -self.cfg["normalization"]["clip_actions"], self.cfg["normalization"]["clip_actions"])
         dof_targets = self.default_dof_pos + self.cfg["control"]["action_scale"] * self.actions
+
+        # --- Keyframe playback: hold a single static pose --------------------
+        if self.keyframe_playback and self.keyframes is not None:
+            idx = max(0, min(self.keyframe_index, self.keyframes.shape[0] - 1))
+            dof_targets = self.keyframes[idx].unsqueeze(0).expand(self.num_envs, -1)
+            self.actions[:] = (dof_targets - self.default_dof_pos) / max(self.cfg["control"]["action_scale"], 1e-8)
+        # ----------------------------------------------------------------------
         
         # Log actions for first environment only
         if hasattr(self, 'actions_csv_writer'):
