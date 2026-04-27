@@ -311,7 +311,6 @@ class StandUp(BaseTask):
         kf_cfg = self.cfg.get("keyframes", {})
         self.keyframe_playback = kf_cfg.get("playback", False)
         self.keyframe_index = kf_cfg.get("index", 0)
-        self.keyframe_height_offset = kf_cfg.get("height_offset", 0.05)
         csv_path = kf_cfg.get("csv_path", None)
 
         if csv_path is None:
@@ -326,8 +325,7 @@ class StandUp(BaseTask):
 
         self.keyframes = torch.tensor(loco_dofs, dtype=torch.float, device=self.device)
         print(f"[StandUp] Loaded {self.keyframes.shape[0]} keyframes from CSV")
-        print(f"[StandUp] Active keyframe index: {self.keyframe_index}  "
-              f"height_offset: {self.keyframe_height_offset}m")
+        print(f"[StandUp] Active keyframe index: {self.keyframe_index}")
 
     def _init_csv_logging(self):
         """Initialize CSV files for logging actions and observations of the first environment"""
@@ -413,9 +411,6 @@ class StandUp(BaseTask):
         self.root_states[env_ids, :2] += self.env_origins[env_ids, :2]
         self.root_states[env_ids, :2] = apply_randomization(self.root_states[env_ids, :2], self.cfg["randomization"].get("init_base_pos_xy"))
         self.root_states[env_ids, 2] += self.terrain.terrain_heights(self.root_states[env_ids, :2])
-        # Extra height so keyframe poses don't clip into the ground
-        if self.keyframe_playback:
-            self.root_states[env_ids, 2] += self.keyframe_height_offset
         self.root_states[env_ids, 3:7] = quat_from_euler_xyz(
             torch.zeros(len(env_ids), dtype=torch.float, device=self.device),
             torch.zeros(len(env_ids), dtype=torch.float, device=self.device),
@@ -580,71 +575,71 @@ class StandUp(BaseTask):
             self.actions[:] = (dof_targets - self.default_dof_pos) / max(self.cfg["control"]["action_scale"], 1e-8)
         # ----------------------------------------------------------------------
         
-        # Log actions for first environment only
-        if hasattr(self, 'actions_csv_writer'):
-            # Convert to CPU and numpy for CSV writing
-            actions_env0 = self.actions[0].cpu().numpy()
-            self.actions_csv_writer.writerow(actions_env0)
-            self.actions_csv_file.flush()  # Ensure data is written immediately
+        # # Log actions for first environment only
+        # if hasattr(self, 'actions_csv_writer'):
+        #     # Convert to CPU and numpy for CSV writing
+        #     actions_env0 = self.actions[0].cpu().numpy()
+        #     self.actions_csv_writer.writerow(actions_env0)
+        #     self.actions_csv_file.flush()  # Ensure data is written immediately
         
-        print(actions)
+        # print(actions)
 
-        # perform physics step
-        self.torques.zero_()
-        for i in range(self.cfg["control"]["decimation"]):
-            self.last_dof_targets[self.delay_steps == i] = dof_targets[self.delay_steps == i]
-            dof_torques = self.dof_stiffness * (self.last_dof_targets - self.dof_pos) - self.dof_damping * self.dof_vel
-            friction = torch.min(self.dof_friction, dof_torques.abs()) * torch.sign(dof_torques)
-            dof_torques = torch.clip(dof_torques - friction, min=-self.torque_limits, max=self.torque_limits)
-            self.torques += dof_torques
-            self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(dof_torques))
-            self.gym.simulate(self.sim)
-            if self.device == "cpu":
-                self.gym.fetch_results(self.sim, True)
-            self.gym.refresh_dof_state_tensor(self.sim)
-            self.gym.refresh_dof_force_tensor(self.sim)
-        self.torques /= self.cfg["control"]["decimation"]
-        self.render()
+        # # perform physics step
+        # self.torques.zero_()
+        # for i in range(self.cfg["control"]["decimation"]):
+        #     self.last_dof_targets[self.delay_steps == i] = dof_targets[self.delay_steps == i]
+        #     dof_torques = self.dof_stiffness * (self.last_dof_targets - self.dof_pos) - self.dof_damping * self.dof_vel
+        #     friction = torch.min(self.dof_friction, dof_torques.abs()) * torch.sign(dof_torques)
+        #     dof_torques = torch.clip(dof_torques - friction, min=-self.torque_limits, max=self.torque_limits)
+        #     self.torques += dof_torques
+        #     self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(dof_torques))
+        #     self.gym.simulate(self.sim)
+        #     if self.device == "cpu":
+        #         self.gym.fetch_results(self.sim, True)
+        #     self.gym.refresh_dof_state_tensor(self.sim)
+        #     self.gym.refresh_dof_force_tensor(self.sim)
+        # self.torques /= self.cfg["control"]["decimation"]
+        # self.render()
 
-        # post physics step
-        self.gym.refresh_actor_root_state_tensor(self.sim)
-        self.gym.refresh_net_contact_force_tensor(self.sim)
-        self.gym.refresh_rigid_body_state_tensor(self.sim)
-        self.base_pos[:] = self.root_states[:, 0:3]
-        self.base_quat[:] = self.root_states[:, 3:7]
-        self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
-        self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
-        self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
-        self.filtered_lin_vel[:] = self.base_lin_vel[:] * self.cfg["normalization"]["filter_weight"] + self.filtered_lin_vel[:] * (
-            1.0 - self.cfg["normalization"]["filter_weight"]
-        )
+        # # post physics step
+        # self.gym.refresh_actor_root_state_tensor(self.sim)
+        # self.gym.refresh_net_contact_force_tensor(self.sim)
+        # self.gym.refresh_rigid_body_state_tensor(self.sim)
+        # self.base_pos[:] = self.root_states[:, 0:3]
+        # self.base_quat[:] = self.root_states[:, 3:7]
+        # self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
+        # self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
+        # self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        # self.filtered_lin_vel[:] = self.base_lin_vel[:] * self.cfg["normalization"]["filter_weight"] + self.filtered_lin_vel[:] * (
+        #     1.0 - self.cfg["normalization"]["filter_weight"]
+        # )
         
-        self.filtered_ang_vel[:] = self.base_ang_vel[:] * self.cfg["normalization"]["filter_weight"] + self.filtered_ang_vel[:] * (
-            1.0 - self.cfg["normalization"]["filter_weight"]
-        )
+        # self.filtered_ang_vel[:] = self.base_ang_vel[:] * self.cfg["normalization"]["filter_weight"] + self.filtered_ang_vel[:] * (
+        #     1.0 - self.cfg["normalization"]["filter_weight"]
+        # )
 
-        self._refresh_feet_state()
+        # self._refresh_feet_state()
 
-        self.episode_length_buf += 1
-        self.common_step_counter += 1
-        self.gait_process[:] = torch.fmod(self.gait_process + self.dt * self.gait_frequency, 1.0)
+        # self.episode_length_buf += 1
+        # self.common_step_counter += 1
+        # self.gait_process[:] = torch.fmod(self.gait_process + self.dt * self.gait_frequency, 1.0)
 
-        self._kick_robots()
-        self._push_robots()
-        self._check_termination()
-        self._compute_reward()
+        # self._kick_robots()
+        # self._push_robots()
+        # self._check_termination()
+        # self._compute_reward()
 
-        env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
-        self._reset_idx(env_ids)
-        self._teleport_robot()
-        self._resample_commands()
+        # env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
+        # self._reset_idx(env_ids)
+        # self._teleport_robot()
+        # self._resample_commands()
 
-        self._compute_observations()
+        # self._compute_observations()
 
-        self.last_actions[:] = self.actions
-        self.last_dof_vel[:] = self.dof_vel
-        self.last_root_vel[:] = self.root_states[:, 7:13]
-        self.last_feet_pos[:] = self.feet_pos
+        # self.last_actions[:] = self.actions
+        # self.last_dof_vel[:] = self.dof_vel
+        # self.last_root_vel[:] = self.root_states[:, 7:13]
+        # self.last_feet_pos[:] = self.feet_pos
 
         return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
